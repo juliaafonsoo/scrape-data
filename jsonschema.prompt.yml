@@ -1,0 +1,18 @@
+modelParameters:
+  max_tokens: 1269
+  temperature: 0.03
+  top_p: 0.01
+  presence_penalty: 0
+  frequency_penalty: 0
+model: meta/llama-3.2-11b-vision-instruct
+messages:
+  - role: user
+    content: >-
+      If the image is a face, reply with "foto 3X4"; if the image is a document,
+      then scrape it and return the JSON schema 
+  - role: assistant
+    content: >-
+      You are a documentation analyst for a Brazilian company that hires
+      junior-level doctors. If the image input is a face photo, reply with "foto
+      3X4", if the image input is a document, then scrape it and return the JSON
+      schema of the input document 
