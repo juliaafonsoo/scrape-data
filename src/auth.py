@@ -1,5 +1,5 @@
 """
-Módulo de autenticação para Gmail API usando OAuth2
+Módulo de autenticação para Gmail API usando OAuth2 com variáveis de ambiente
 """
 
 import os
@@ -11,8 +11,6 @@ from googleapiclient.discovery import build
 
 
 # Configuração
-CREDENTIALS_FILE = 'credentials.json'  # OAuth2 credentials
-TOKEN_FILE = 'token.json'              # Arquivo para salvar token
 LABEL_NAME = 'DOC-MEDICOS'
 
 # Scopes necessários para Gmail (versão mais permissiva para desenvolvimento)
@@ -25,47 +23,100 @@ SCOPES = [
 # SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 
+def get_credentials_from_env():
+    """
+    Obtém credenciais OAuth2 das variáveis de ambiente.
+    
+    Returns:
+        dict: Conteúdo das credenciais
+    """
+    credentials_content = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+    if not credentials_content:
+        raise ValueError(
+            "Variável de ambiente GOOGLE_CREDENTIALS_JSON não encontrada. "
+            "Configure-a com o conteúdo do arquivo credentials.json"
+        )
+    
+    try:
+        return json.loads(credentials_content)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Erro ao decodificar GOOGLE_CREDENTIALS_JSON: {e}")
+
+
+def get_token_from_env():
+    """
+    Obtém token OAuth2 das variáveis de ambiente.
+    
+    Returns:
+        dict: Conteúdo do token (sem o campo expiry)
+    """
+    token_content = os.environ.get('GOOGLE_TOKEN_JSON')
+    if not token_content:
+        return None
+    
+    try:
+        token_data = json.loads(token_content)
+        # Remove o campo expiry se existir - deixa o Google lidar com isso
+        if 'expiry' in token_data:
+            del token_data['expiry']
+        return token_data
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Erro ao decodificar GOOGLE_TOKEN_JSON: {e}")
+
+
+def save_token_to_env(credentials):
+    """
+    Salva o token atualizado na variável de ambiente (sem expiry).
+    
+    Args:
+        credentials: Credenciais do Google
+    """
+    token_data = json.loads(credentials.to_json())
+    # Remove o campo expiry se existir - deixa o Google lidar com isso
+    if 'expiry' in token_data:
+        del token_data['expiry']
+    
+    # Nota: Em produção, você deve usar um sistema seguro para atualizar
+    # variáveis de ambiente. Este é apenas um exemplo.
+    print("💾 Token atualizado. Em produção, atualize a variável GOOGLE_TOKEN_JSON.")
+    print(f"Novo token (sem expiry): {json.dumps(token_data)}")
+
+
 def get_gmail_credentials():
     """
-    Cria e retorna credenciais autenticadas para Gmail API usando OAuth2.
+    Cria e retorna credenciais autenticadas para Gmail API usando OAuth2 com variáveis de ambiente.
     
     Returns:
         google.oauth2.credentials.Credentials: Credenciais autenticadas
     """
     creds = None
     
-    # Verifica se já existe token salvo
-    if os.path.exists(TOKEN_FILE):
-        print("📁 Carregando token existente...")
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+    # Verifica se já existe token nas variáveis de ambiente
+    token_data = get_token_from_env()
+    if token_data:
+        print("📁 Carregando token das variáveis de ambiente...")
+        creds = Credentials.from_authorized_user_info(token_data, SCOPES)
     
     # Se não há credenciais válidas disponíveis
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             print("🔄 Renovando token expirado...")
             creds.refresh(Request())
+            save_token_to_env(creds)
         else:
-            # Verifica se o arquivo de credenciais existe
-            if not os.path.exists(CREDENTIALS_FILE):
-                raise FileNotFoundError(
-                    f"Arquivo {CREDENTIALS_FILE} não encontrado. "
-                    "Baixe as credenciais OAuth2 do Google Cloud Console."
-                )
+            # Obtém credenciais das variáveis de ambiente
+            credentials_data = get_credentials_from_env()
             
             print("🔐 Iniciando fluxo de autenticação OAuth2...")
             print("Uma janela do navegador será aberta para autorização.")
             
             # Inicia o fluxo OAuth2
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_FILE, SCOPES)
+            flow = InstalledAppFlow.from_client_config(
+                credentials_data, SCOPES)
             creds = flow.run_local_server(port=0)
             
             print("✅ Autorização concluída!")
-        
-        # Salva as credenciais para uso futuro
-        print("💾 Salvando token para uso futuro...")
-        with open(TOKEN_FILE, 'w') as token:
-            token.write(creds.to_json())
+            save_token_to_env(creds)
     
     return creds
 
@@ -94,10 +145,7 @@ def refresh_credentials(credentials):
     """
     if credentials.expired and credentials.refresh_token:
         credentials.refresh(Request())
-        
-        # Salva token atualizado
-        with open(TOKEN_FILE, 'w') as token:
-            token.write(credentials.to_json())
+        save_token_to_env(credentials)
     
     return credentials
 
@@ -111,8 +159,7 @@ def validate_authentication():
     """
     try:
         print("🔐 Validando autenticação OAuth2...")
-        print(f"   Credentials File: {CREDENTIALS_FILE}")
-        print(f"   Token File: {TOKEN_FILE}")
+        print("   Usando variáveis de ambiente para credenciais")
         print(f"   Scopes: {SCOPES}")
         
         service = get_gmail_service()
@@ -136,8 +183,8 @@ def validate_authentication():
     except Exception as e:
         print(f"❌ Erro na autenticação: {str(e)}")
         print("\n🔧 Possíveis soluções:")
-        print("1. Verificar se o arquivo credentials.json está presente")
-        print("2. Excluir token.json e refazer a autenticação")
+        print("1. Verificar se a variável GOOGLE_CREDENTIALS_JSON está configurada")
+        print("2. Verificar se a variável GOOGLE_TOKEN_JSON está configurada")
         print("3. Verificar se os scopes estão corretos no Google Cloud Console")
         print("4. Verificar se a API Gmail está habilitada no projeto")
         return False
@@ -150,28 +197,35 @@ def check_oauth_info():
     try:
         print("📋 Informações do OAuth2:")
         
-        # Informações do credentials.json
-        if os.path.exists(CREDENTIALS_FILE):
-            with open(CREDENTIALS_FILE, 'r') as f:
-                cred_info = json.load(f)
-            
-            installed = cred_info.get('installed', {})
-            print(f"   Project ID: {installed.get('project_id')}")
-            print(f"   Client ID: {installed.get('client_id')}")
-            print(f"   Auth URI: {installed.get('auth_uri')}")
+        # Informações das variáveis de ambiente
+        credentials_env = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+        if credentials_env:
+            try:
+                cred_info = json.loads(credentials_env)
+                installed = cred_info.get('installed', {})
+                print(f"   Project ID: {installed.get('project_id')}")
+                print(f"   Client ID: {installed.get('client_id')}")
+                print(f"   Auth URI: {installed.get('auth_uri')}")
+                print("   ✅ GOOGLE_CREDENTIALS_JSON configurada")
+            except json.JSONDecodeError:
+                print("   ❌ GOOGLE_CREDENTIALS_JSON mal formada")
         else:
-            print(f"   ❌ Arquivo {CREDENTIALS_FILE} não encontrado")
+            print("   ❌ Variável GOOGLE_CREDENTIALS_JSON não encontrada")
         
-        # Informações do token.json
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, 'r') as f:
-                token_info = json.load(f)
-            
-            print(f"   Token válido: {'✅' if token_info.get('token') else '❌'}")
-            print(f"   Refresh token: {'✅' if token_info.get('refresh_token') else '❌'}")
-            print(f"   Expiry: {token_info.get('expiry', 'N/A')}")
+        # Informações do token
+        token_env = os.environ.get('GOOGLE_TOKEN_JSON')
+        if token_env:
+            try:
+                token_info = json.loads(token_env)
+                print(f"   Token válido: {'✅' if token_info.get('token') else '❌'}")
+                print(f"   Refresh token: {'✅' if token_info.get('refresh_token') else '❌'}")
+                print("   ✅ GOOGLE_TOKEN_JSON configurada")
+                # Não mostra mais expiry pois foi removido
+                print("   ℹ️  Campo 'expiry' removido - Google gerencia automaticamente")
+            except json.JSONDecodeError:
+                print("   ❌ GOOGLE_TOKEN_JSON mal formada")
         else:
-            print(f"   Token: ❌ Arquivo {TOKEN_FILE} não encontrado")
+            print("   ❌ Variável GOOGLE_TOKEN_JSON não encontrada")
             
     except Exception as e:
         print(f"Erro ao ler informações OAuth2: {e}")
@@ -179,13 +233,13 @@ def check_oauth_info():
 
 def reset_authentication():
     """
-    Remove o token salvo para forçar nova autenticação
+    Remove o token das variáveis de ambiente para forçar nova autenticação
     """
     try:
-        if os.path.exists(TOKEN_FILE):
-            os.remove(TOKEN_FILE)
-            print(f"✅ Token removido. Nova autenticação será necessária.")
+        if os.environ.get('GOOGLE_TOKEN_JSON'):
+            print("ℹ️  Para resetar a autenticação, remova a variável GOOGLE_TOKEN_JSON.")
+            print("   Em seguida, execute novamente o programa para nova autenticação.")
         else:
-            print("ℹ️  Nenhum token encontrado para remover.")
+            print("ℹ️  Variável GOOGLE_TOKEN_JSON não encontrada. Nova autenticação será necessária.")
     except Exception as e:
-        print(f"Erro ao remover token: {e}")
+        print(f"Erro ao verificar token: {e}")
