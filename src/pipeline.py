@@ -3,13 +3,19 @@ Pipeline de orquestração de ponta a ponta para scraping de emails
 """
 
 import json
+import sys
+import os
 from typing import List, Dict, Any
 from datetime import datetime
 
-from .auth import validate_authentication, LABEL_NAME
-from .gmail_client import GmailClient
-from .models import EmailData
-from .utils import save_emails_to_json
+# Adiciona o diretório src ao path para imports relativos
+sys.path.insert(0, os.path.dirname(__file__))
+
+from auth import validate_authentication, LABEL_NAME
+from gmail_client import GmailClient
+from models import EmailData
+from utils import save_emails_to_json
+from document_classifier import DocumentClassifier
 
 
 class EmailScrapingPipeline:
@@ -43,7 +49,7 @@ class EmailScrapingPipeline:
             print(f"❌ Erro ao inicializar cliente Gmail: {str(e)}")
             return False
     
-    def run_full_pipeline(self, label_name: str = LABEL_NAME, max_emails: int = 100, output_file: str = None) -> bool:
+    def run_full_pipeline(self, label_name: str = LABEL_NAME, max_emails: int = 100, output_file: str = None, classify_documents: bool = True) -> bool:
         """
         Executa o pipeline completo de scraping
         
@@ -51,6 +57,7 @@ class EmailScrapingPipeline:
             label_name: Nome do label para filtrar emails
             max_emails: Número máximo de emails para processar
             output_file: Arquivo de saída (opcional)
+            classify_documents: Se True, classifica documentos usando Vision API
             
         Returns:
             bool: True se pipeline executou com sucesso
@@ -58,6 +65,7 @@ class EmailScrapingPipeline:
         print(f"🚀 Iniciando pipeline de scraping...")
         print(f"   Label: {label_name}")
         print(f"   Max emails: {max_emails}")
+        print(f"   Classificar documentos: {classify_documents}")
         
         # Setup
         if not self.setup():
@@ -86,7 +94,15 @@ class EmailScrapingPipeline:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = f"emails_scraped_{timestamp}.json"
         
-        return self.save_results(output_file)
+        # Salva primeiro sem classificação
+        if not self.save_results(output_file):
+            return False
+        
+        # Classificar documentos se solicitado
+        if classify_documents:
+            return self.classify_documents(output_file)
+        
+        return True
     
     def save_results(self, output_file: str) -> bool:
         """
@@ -124,6 +140,44 @@ class EmailScrapingPipeline:
                 
         except Exception as e:
             print(f"❌ Erro ao salvar resultados: {str(e)}")
+            return False
+    
+    def classify_documents(self, json_file: str) -> bool:
+        """
+        Classifica documentos usando Google Cloud Vision API
+        
+        Args:
+            json_file: Arquivo JSON com os dados dos emails
+            
+        Returns:
+            bool: True se classificação foi bem-sucedida
+        """
+        try:
+            print("\n🔍 Iniciando classificação de documentos...")
+            
+            # Inicializa o classificador
+            classifier = DocumentClassifier(test_mode=True)  # Usa modo teste por padrão
+            
+            # Determina arquivo de saída
+            base_name = json_file.replace('.json', '')
+            classified_file = f"{base_name}_classified.json"
+            
+            # Processa classificação
+            success = classifier.process_emails_data(
+                input_file=json_file,
+                output_file=classified_file,
+                base_path=""  # Assumindo que anexoPath já tem caminho completo
+            )
+            
+            if success:
+                print(f"✅ Documentos classificados e salvos em: {classified_file}")
+                return True
+            else:
+                print("❌ Falha na classificação de documentos")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Erro durante classificação de documentos: {str(e)}")
             return False
     
     def get_processing_stats(self) -> Dict[str, Any]:
@@ -175,6 +229,8 @@ def run_pipeline_cli():
     parser.add_argument('--label', default=LABEL_NAME, help='Label para filtrar emails')
     parser.add_argument('--max-emails', type=int, default=100, help='Número máximo de emails')
     parser.add_argument('--output', help='Arquivo de saída JSON')
+    parser.add_argument('--classify', action='store_true', default=True, help='Classificar documentos usando Vision API')
+    parser.add_argument('--no-classify', action='store_false', dest='classify', help='Pular classificação de documentos')
     
     args = parser.parse_args()
     
@@ -182,7 +238,8 @@ def run_pipeline_cli():
     success = pipeline.run_full_pipeline(
         label_name=args.label,
         max_emails=args.max_emails,
-        output_file=args.output
+        output_file=args.output,
+        classify_documents=args.classify
     )
     
     if success:
