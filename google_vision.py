@@ -34,7 +34,6 @@ def analyze_image_with_vision(image_path: str) -> Dict[str, Any]:
         features = [
             vision.Feature(type=vision.Feature.Type.TEXT_DETECTION),
             vision.Feature(type=vision.Feature.Type.LABEL_DETECTION),
-            vision.Feature(type=vision.Feature.Type.FACE_DETECTION)
         ]
         
         # Criar requisição com múltiplas features
@@ -49,24 +48,18 @@ def analyze_image_with_vision(image_path: str) -> Dict[str, Any]:
         return {
             'text': response.full_text_annotation.text if response.full_text_annotation.text else "",
             'labels': [label.description.lower() for label in response.label_annotations],
-            'faces': len(response.face_annotations),
             'error': None
         }
     except Exception as e:
         print(f"Erro ao processar {image_path}: {str(e)}")
-        return {'text': "", 'labels': [], 'faces': 0, 'error': str(e)}
+        return {'text': "", 'labels': [], 'error': str(e)}
 
 def identify_document_type(vision_result: Dict[str, Any], filename: str) -> str:
     """Identifica o tipo de documento baseado nos resultados do Vision API"""
     
     text = vision_result['text'].lower() if vision_result['text'] else ""
     labels = vision_result['labels']
-    faces_count = vision_result['faces']
     filename_lower = filename.lower()
-    
-    # 1. FOTO_3X4 - detecta rostos e termos no nome do arquivo
-    if faces_count >= 1 and any(term in filename_lower for term in ['3x4', 'foto']):
-        return "FOTO_3X4"
     
     # 2. RG - Registro Geral
     if any(term in text for term in ['registro geral', 'rg:', 'identidade', 'ssp', 'secretaria de segurança']):
@@ -201,4 +194,4 @@ if __name__ == "__main__":
     # Certifique-se de que as credenciais do Google Cloud estão configuradas
     # export GOOGLE_APPLICATION_CREDENTIALS="path/to/your/credentials.json"
     
-    process_emails_json('emails.json')
+    process_emails_json('images_v3.json')
